@@ -35,25 +35,46 @@ document.querySelectorAll('.light').forEach(el => {
     document.getElementById('light-id').innerText = currentLight;
     document.getElementById('popup').classList.remove('hidden');
     const hint = document.getElementById('manualHint');
-    hint.textContent = (window._mode === 'auto') ? 'AUTO đang bật: điều khiển tay sẽ bị khóa.' : '';
+    // Cập nhật hint: đang AUTO thì sẽ tự chuyển sang MANUAL khi chọn màu
+    hint.textContent = (window._mode === 'auto')
+      ? 'Đang AUTO — sẽ tự chuyển sang MANUAL khi bạn chọn màu.'
+      : '';
   });
 });
 document.getElementById('close').onclick = () => {
   document.getElementById('popup').classList.add('hidden');
 };
 
-// ---- Manual set ----
+// ---- Manual set (auto-switch from AUTO -> MANUAL) ----
 async function setLight(color) {
-  if (window._mode === 'auto') {
-    alert('Auto mode đang bật. Hãy chuyển sang Manual để điều khiển tay.');
-    return;
-  }
   try {
-    const res = await fetch(`/set?lamp=${currentLight}&color=${color}`);
-    if (res.status === 409) alert('Auto mode đang bật. Điều khiển tay bị từ chối.');
+    if (currentLight == null) {
+      alert('Chưa chọn cột đèn.');
+      return;
+    }
+
+    // Nếu đang AUTO thì chuyển qua MANUAL trước để UI đồng bộ
+    if (window._mode === 'auto') {
+      const m = await fetch('/mode?set=manual', { cache: 'no-store' });
+      if (!m.ok) {
+        const t = await m.text().catch(()=>'');
+        alert('Không chuyển được sang MANUAL: ' + t);
+        return;
+      }
+      window._mode = 'manual'; // cập nhật tạm cho UI
+    }
+
+    // Gửi lệnh đặt màu
+    const res = await fetch(`/set?lamp=${currentLight}&color=${color}`, { cache: 'no-store' });
+    if (!res.ok) {
+      const t = await res.text().catch(()=>'');
+      alert('Lỗi khi đặt đèn: ' + t);
+    }
+
     await refresh();
   } catch (e) {
     console.error(e);
+    alert('Mạng bị lỗi. Thử lại nhé.');
   } finally {
     document.getElementById('popup').classList.add('hidden');
   }
@@ -116,8 +137,14 @@ function handleRedEdited() {
   if (!isLocked('r')) tr.value = g + y;
 }
 
-btnManual.onclick = async () => { await fetch('/mode?set=manual'); await refresh(); };
-btnAuto.onclick   = async () => { await fetch('/mode?set=auto');   await refresh(); };
+btnManual.onclick = async () => {
+  await fetch('/mode?set=manual', { cache: 'no-store' });
+  await refresh();
+};
+btnAuto.onclick   = async () => {
+  await fetch('/mode?set=auto',   { cache: 'no-store' });
+  await refresh();
+};
 
 document.getElementById('btnSetTiming').onclick = async () => {
   try {
@@ -126,7 +153,7 @@ document.getElementById('btnSetTiming').onclick = async () => {
     if (g == null || y == null) { alert('Vui lòng nhập đủ thời gian G và Y (giây).'); return; }
     g = clampSec(g);
     y = clampSec(y);
-    await fetch(`/timing?g=${g}&y=${y}`);
+    await fetch(`/timing?g=${g}&y=${y}`, { cache: 'no-store' });
     mark('g', false); mark('y', false); mark('r', false);
   } catch (e) {
     console.error(e);
@@ -160,17 +187,17 @@ function updateLamp(lamp, color) {
 // ---- Poll /status ----
 async function refresh() {
   try {
-    const s = await fetch('/status').then(r => r.json());
+    const s = await fetch('/status', { cache: 'no-store' }).then(r => r.json());
 
     window._mode = s.mode; // 'auto' | 'manual'
-    modeLabel.textContent = s.mode ? s.mode.toUpperCase() : '?';
+    if (modeLabel) modeLabel.textContent = s.mode ? s.mode.toUpperCase() : '?';
 
     if (s.mode === 'auto') {
-      btnAuto.classList.add('active'); btnManual.classList.remove('active');
-      autoPanel.classList.remove('hidden');
+      btnAuto?.classList.add('active'); btnManual?.classList.remove('active');
+      autoPanel?.classList.remove('hidden');
     } else {
-      btnManual.classList.add('active'); btnAuto.classList.remove('active');
-      autoPanel.classList.add('hidden');
+      btnManual?.classList.add('active'); btnAuto?.classList.remove('active');
+      autoPanel?.classList.add('hidden');
     }
 
     if (s.timing) {
@@ -185,12 +212,12 @@ async function refresh() {
     if (s.mode === 'auto') {
       const phaseMap = { A_G: 'A Green / B Red', A_Y: 'A Yellow / B Red', B_G: 'A Red / B Green', B_Y: 'A Red / B Yellow' };
       const p = s.phase || '?';
-      phaseText.textContent  = `Phase: ${phaseMap[p] || p}`;
+      if (phaseText)  phaseText.textContent  = `Phase: ${phaseMap[p] || p}`;
       const remain = Math.max(0, Math.round((s.t_remain_ms ?? 0) / 1000));
-      remainText.textContent = `Remain: ${remain}s`;
+      if (remainText) remainText.textContent = `Remain: ${remain}s`;
     } else {
-      phaseText.textContent = '';
-      remainText.textContent = '';
+      if (phaseText)  phaseText.textContent  = '';
+      if (remainText) remainText.textContent = '';
     }
 
     if (Array.isArray(s.lamps)) {
